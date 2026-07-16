@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎬 投影專用 - 猜歌大賽 (防災強固超頻版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; }
+    </style>
+    <script src="https://www.youtube.com/iframe_api"></script>
+</head>
+<body class="bg-slate-900 text-white min-h-screen flex flex-col justify-between p-6">
+    <header class="w-full max-w-5xl mx-auto flex justify-between items-center border-b border-slate-700 pb-4 mb-4">
+        <div>
+            <h1 class="text-3xl font-black text-indigo-400 tracking-wider">🎤 派對猜歌投影幕 🎤</h1>
+            <p class="text-xs text-slate-500 mt-1">※ 本系統支援自動存檔，重新整理免驚！</p>
+        </div>
+        <div class="flex items-center space-x-6 text-xl">
+            <div>得分: <span id="score" class="text-green-400 font-extrabold text-2xl">0</span></div>
+            <div>目前題數: <span id="question-num" class="text-indigo-400 font-extrabold text-2xl">1</span>/<span id="total-questions">3</span></div>
+            <button onclick="resetGame()" class="text-xs bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg border border-slate-600 transition">
+                🧹 重置新局
+            </button>
+        </div>
+    </header>
+    <main class="w-full max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8 items-center my-auto">
+        <div class="flex flex-col items-center">
+            <div class="w-full aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl border-4 border-slate-700">
+                <div id="yt-player" class="w-full h-full"></div>
+            </div>
+            <p class="text-slate-400 text-sm mt-2">※ 提示：猜對或點擊「公布答案」後，影片會自動播放。</p>
+            <p id="playback-warning" class="hidden text-red-400 text-sm mt-1 font-bold">⚠️ 影片播放異常，請確認網路連線或手動點擊播放器播放。</p>
+        </div>
+        <div class="bg-slate-800 p-8 rounded-2xl shadow-xl border border-slate-700 flex flex-col justify-between h-full min-h-[400px]">
+            <div class="text-center py-6">
+                <span class="text-slate-400 text-sm block mb-2">挑戰歌名：</span>
+                <span id="masked-title" class="text-4xl font-mono tracking-widest text-yellow-400 font-black">###</span>
+            </div>
+            <div class="space-y-4">
+                <div id="game-inputs" class="space-y-4">
+                    <input type="text" id="answer-input" placeholder="請主持人輸入大家的答案..."
+                           onkeydown="if(event.key === 'Enter') checkAnswer()"
+                           class="w-full bg-slate-700 border-2 border-slate-600 rounded-xl py-3 px-4 text-white focus:outline-none focus:border-indigo-500 text-center text-xl font-bold">
+                    <button onclick="checkAnswer()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold py-4 px-6 rounded-xl transition duration-200 text-lg shadow-lg">
+                        🎯 驗證答案 (需完全一致)
+                    </button>
+                </div>
+                <p id="feedback" class="text-center text-2xl font-bold min-h-[2rem]"></p>
+                <div class="grid grid-cols-2 gap-4">
+                    <button id="reveal-btn" onclick="revealAnswer()" class="bg-red-600 hover:bg-red-500 text-white font-bold py-3 px-4 rounded-lg transition">
+                        👁️ 公布答案
+                    </button>
+                    <button id="next-btn" onclick="nextQuestion()" class="hidden bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-4 rounded-lg transition">
+                        下一題 ➡️
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+    <footer class="text-slate-500 text-center text-sm mt-4">
+        Zero Cost Party Game Tool
+    </footer>
+    <script>
+        // ================= 歌單設定區 =================
+        const playlist = [
+            { id: "dQw4w9WgXcQ", answer: "Never Gonna Give You Up" },
+            { id: "kJQP7kiw5Fk", answer: "Despacito" },
+            { id: "9bZkp7q19f0", answer: "Gangnam Style" }
+        ];
+        const STORAGE_KEYS = {
+            index: 'guess_game_index',
+            score: 'guess_game_score',
+            guessed: 'guess_game_guessed',
+            playlistLength: 'guess_game_playlist_length'
+        };
+        const savedPlaylistLength = parseInt(localStorage.getItem(STORAGE_KEYS.playlistLength));
+        const playlistChanged = savedPlaylistLength !== playlist.length;
+        let currentIndex = playlistChanged ? 0 : (parseInt(localStorage.getItem(STORAGE_KEYS.index)) || 0);
+        let score = playlistChanged ? 0 : (parseInt(localStorage.getItem(STORAGE_KEYS.score)) || 0);
+        let hasGuessed = playlistChanged ? false : (localStorage.getItem(STORAGE_KEYS.guessed) === 'true');
+        let player;
+        document.getElementById('total-questions').innerText = playlist.length;
+        // 初始化 YouTube 播放器
+        function onYouTubeIframeAPIReady() {
+            // 防呆：如果重整時發現已經是 Game Over 狀態，不重設 index
+            let targetIndex = currentIndex;
+            if (targetIndex >= playlist.length) {
+                targetIndex = playlist.length - 1; // 播放最後一首作為背景
+            }
+            player = new YT.Player('yt-player', {
+                videoId: playlist[targetIndex] ? playlist[targetIndex].id : "",
+                playerVars: {
+                    'playsinline': 1,
+                    'controls': 1,
+                    'autoplay': 0
+                },
+                events: {
+                    'onReady': onPlayerReady
+                }
+            });
+        }
+        function onPlayerReady(event) {
+            saveState();
+            updateUI();
+        }
+        // 同步狀態並更新 UI 畫面
+        function updateUI() {
+            // 如果已經是結束狀態
+            if (currentIndex >= playlist.length) {
+                document.getElementById('score').innerText = score;
+                document.getElementById('question-num').innerText = playlist.length;
+                showGameOver();
+                return;
+            }
+            document.getElementById('score').innerText = score;
+            document.getElementById('question-num').innerText = currentIndex + 1;
+            document.getElementById('playback-warning').classList.add('hidden');
+            if (hasGuessed) {
+                document.getElementById('masked-title').innerText = playlist[currentIndex].answer;
+                document.getElementById('game-inputs').classList.add('hidden');
+                document.getElementById('reveal-btn').classList.add('hidden');
+                document.getElementById('next-btn').classList.remove('hidden');
+            } else {
+                updateMaskedTitle();
+                document.getElementById('game-inputs').classList.remove('hidden');
+                document.getElementById('reveal-btn').classList.remove('hidden');
+                document.getElementById('next-btn').classList.add('hidden');
+                document.getElementById('feedback').innerText = "";
+                document.getElementById('answer-input').value = "";
+            }
+        }
+        // 更新 ## 遮蔽歌名 (優化：使用 HTML 不換行空白以確保寬度正常渲染)
+        function updateMaskedTitle() {
+            if (currentIndex >= playlist.length) return;
+            const currentAnswer = playlist[currentIndex].answer;
+            let masked = "";
+            for (let i = 0; i < currentAnswer.length; i++) {
+                if (currentAnswer[i] === " ") {
+                    masked += "&nbsp;&nbsp;";
+                } else {
+                    masked += "#";
+                }
+            }
+            document.getElementById('masked-title').innerHTML = masked;
+        }
+        // 統一處理播放，加入 player 初始化防呆
+        function tryPlay() {
+            if (!player || typeof player.playVideo !== 'function') {
+                document.getElementById('playback-warning').classList.remove('hidden');
+                return;
+            }
+            try {
+                player.playVideo();
+                document.getElementById('playback-warning').classList.add('hidden');
+            } catch (e) {
+                console.log("播放失敗，可能 API 未載入完成或被擋", e);
+                document.getElementById('playback-warning').classList.remove('hidden');
+            }
+        }
+        // 統一處理載入，加入 player 初始化防呆
+        function tryCue(videoId) {
+            if (!player || typeof player.cueVideoById !== 'function') {
+                document.getElementById('playback-warning').classList.remove('hidden');
+                return;
+            }
+            try {
+                player.cueVideoById({ videoId: videoId });
+                document.getElementById('playback-warning').classList.add('hidden');
+            } catch (e) {
+                console.log("載入下一首失敗", e);
+                document.getElementById('playback-warning').classList.remove('hidden');
+            }
+        }
+        // 完全比對邏輯
+        function checkAnswer() {
+            if (hasGuessed || currentIndex >= playlist.length) return;
+            const userInput = document.getElementById('answer-input').value.trim().toLowerCase();
+            const correctAnswer = playlist[currentIndex].answer.trim().toLowerCase();
+            if (userInput === correctAnswer) {
+                hasGuessed = true;
+                score += 10;
+                saveState();
+                document.getElementById('masked-title').innerText = playlist[currentIndex].answer;
+                document.getElementById('feedback').className = "text-center text-green-400 font-black text-2xl";
+                document.getElementById('feedback').innerText = "🎉 完全正確！";
+                tryPlay();
+                updateUI();
+            } else {
+                document.getElementById('feedback').className = "text-center text-red-500 font-bold text-lg";
+                document.getElementById('feedback').innerText = "❌ 答案不對喔，再試一次！";
+                const inputEl = document.getElementById('answer-input');
+                inputEl.classList.add('border-red-500');
+                setTimeout(() => inputEl.classList.remove('border-red-500'), 1000);
+            }
+        }
+        // 公布答案
+        function revealAnswer() {
+            if (hasGuessed || currentIndex >= playlist.length) return;
+            hasGuessed = true;
+            saveState();
+            document.getElementById('masked-title').innerText = playlist[currentIndex].answer;
+            document.getElementById('feedback').className = "text-center text-yellow-500 font-bold text-lg";
+            document.getElementById('feedback').innerText = "💡 已公布答案！";
+            tryPlay();
+            updateUI();
+        }
+        // 下一題
+        function nextQuestion() {
+            currentIndex++;
+            hasGuessed = false;
+            saveState();
+            if (currentIndex < playlist.length) {
+                updateUI();
+                tryCue(playlist[currentIndex].id);
+            } else {
+                showGameOver();
+            }
+        }
+        // 結束遊戲畫面
+        function showGameOver() {
+            document.getElementById('masked-title').innerText = "GAME OVER";
+            document.getElementById('feedback').className = "text-center text-indigo-400 font-black text-3xl mt-4";
+            document.getElementById('feedback').innerText = `🏆 遊戲結束！最終得分：${score}`;
+            document.getElementById('game-inputs').classList.add('hidden');
+            document.getElementById('reveal-btn').classList.add('hidden');
+            document.getElementById('next-btn').classList.add('hidden');
+        }
+        // 儲存狀態至 LocalStorage
+        function saveState() {
+            localStorage.setItem(STORAGE_KEYS.index, currentIndex);
+            localStorage.setItem(STORAGE_KEYS.score, score);
+            localStorage.setItem(STORAGE_KEYS.guessed, hasGuessed);
+            localStorage.setItem(STORAGE_KEYS.playlistLength, playlist.length);
+        }
+        // 重置遊戲（開新局）
+        function resetGame() {
+            if (confirm("確定要重置所有進度，重新開始遊戲嗎？")) {
+                Object.values(STORAGE_KEYS).forEach(key => localStorage.removeItem(key));
+                currentIndex = 0;
+                score = 0;
+                hasGuessed = false;
+                saveState();
+                updateUI();
+                if (playlist[currentIndex]) {
+                    tryCue(playlist[currentIndex].id);
+                }
+            }
+        }
+    </script>
+</body>
+</html>
